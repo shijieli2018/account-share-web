@@ -11,12 +11,12 @@
   <section id="login-view" class="auth-page">
     <form id="login-form" class="auth-card">
       <div class="brand auth-brand"><span class="brand-mark">享</span><div><h1>账号共享台</h1><p>仅限获得许可的团队成员</p></div></div>
-      <h2 id="auth-title">登录</h2>
-      <p class="auth-help">使用邮箱和密码进入。新成员注册后，需要管理员批准。</p>
-      <label class="edit-field"><span>邮箱</span><input id="auth-email" type="email" autocomplete="email" required></label>
+      <h2>登录</h2>
+      <p class="auth-help">请输入管理员或使用者的固定账号和密码。</p>
+      <label class="edit-field"><span>登录账号</span><input id="auth-login" type="text" autocomplete="username" autocapitalize="none" required></label>
       <label class="edit-field"><span>密码</span><input id="auth-password" type="password" minlength="8" autocomplete="current-password" required></label>
-      <button id="auth-submit" class="button auth-submit" type="submit">登录</button>
-      <button id="auth-switch" class="link-button" type="button">没有账号？申请注册</button>
+      <label class="remember-option"><input id="remember-login" type="checkbox"><span><strong>近30天免登录</strong><small>仅建议在自己的可信电脑上勾选</small></span></label>
+      <button class="button auth-submit" type="submit">登录</button>
       <p id="auth-message" class="form-message" aria-live="polite"></p>
     </form>
   </section>
@@ -74,4 +74,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-。

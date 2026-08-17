@@ -2,9 +2,34 @@
   "use strict";
   const cfg = window.APP_CONFIG || {};
   const configured = cfg.supabaseUrl && !cfg.supabaseUrl.startsWith("__") && cfg.supabaseAnonKey && !cfg.supabaseAnonKey.startsWith("__");
-  const client = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey) : null;
+  const rememberFlagKey = "account-share-remember-login";
+  const rememberUntilKey = "account-share-remember-until";
+  const rememberedUntilAtLoad = Number(localStorage.getItem(rememberUntilKey) || 0);
+  const rememberExpiredAtLoad = localStorage.getItem(rememberFlagKey) === "1" && rememberedUntilAtLoad <= Date.now();
+  const authStorageKey = configured ? `sb-${new URL(cfg.supabaseUrl).hostname.split(".")[0]}-auth-token` : "";
+  if (rememberExpiredAtLoad) {
+    localStorage.removeItem(rememberFlagKey); localStorage.removeItem(rememberUntilKey);
+    if (authStorageKey) { localStorage.removeItem(authStorageKey); sessionStorage.removeItem(authStorageKey); }
+  }
+  const rememberActive = () => localStorage.getItem(rememberFlagKey) === "1" && Number(localStorage.getItem(rememberUntilKey) || 0) > Date.now();
+  const authStorage = {
+    getItem(key) {
+      if (rememberActive()) return localStorage.getItem(key) || sessionStorage.getItem(key);
+      const current = sessionStorage.getItem(key), legacy = localStorage.getItem(key);
+      if (current) return current;
+      if (legacy) { sessionStorage.setItem(key, legacy); localStorage.removeItem(key); return legacy; }
+      return null;
+    },
+    setItem(key, value) {
+      if (rememberActive()) { localStorage.setItem(key, value); sessionStorage.removeItem(key); }
+      else { sessionStorage.setItem(key, value); localStorage.removeItem(key); }
+    },
+    removeItem(key) { localStorage.removeItem(key); sessionStorage.removeItem(key); }
+  };
+  const client = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth:{ storage:authStorage, persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null;
   const $ = (id) => document.getElementById(id);
-  const state = { session: null, profile: null, accounts: [], selectedId: "", search: "", signup: false, visiblePassword: false };
+  const loginAliases = { admin:"admin@account-share.internal", user:"user@account-share.internal" };
+  const state = { session: null, profile: null, accounts: [], selectedId: "", search: "", visiblePassword: false };
 
   const loginView = $("login-view"), appView = $("app-view"), workspace = $("workspace"), pendingView = $("pending-view");
   const authForm = $("login-form"), authMessage = $("auth-message"), content = $("content"), accountList = $("account-list");
@@ -22,6 +47,14 @@
   function esc(value) { return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c])); }
   function isAdmin() { return state.profile?.role === "admin"; }
   function selected() { return state.accounts.find(x => x.id === state.selectedId) || null; }
+  function applyRememberPreference(enabled) {
+    if (enabled) {
+      localStorage.setItem(rememberFlagKey, "1");
+      localStorage.setItem(rememberUntilKey, String(Date.now() + 30 * 24 * 60 * 60 * 1000));
+    } else {
+      localStorage.removeItem(rememberFlagKey); localStorage.removeItem(rememberUntilKey);
+    }
+  }
 
   async function initialize() {
     if (!client) {
@@ -134,13 +167,15 @@
 
   authForm.onsubmit = async (event) => {
     event.preventDefault(); authMessage.textContent = "处理中…";
-    const email = $("auth-email").value.trim(), password = $("auth-password").value;
-    const result = state.signup ? await client.auth.signUp({ email, password, options:{ data:{display_name:email.split("@")[0]} } }) : await client.auth.signInWithPassword({ email, password });
-    if (result.error) authMessage.textContent = messageOf(result.error);
-    else authMessage.textContent = state.signup && !result.data.session ? "注册成功，请查收确认邮件；确认后等待管理员批准。" : "登录成功。";
+    const loginName = $("auth-login").value.trim().toLowerCase();
+    const email = loginAliases[loginName];
+    if (!email) { authMessage.textContent = "账号不存在，请输入 admin 或 user。"; return; }
+    applyRememberPreference($("remember-login").checked);
+    const result = await client.auth.signInWithPassword({ email, password:$("auth-password").value });
+    authMessage.textContent = result.error ? "账号或密码错误。" : "登录成功。";
   };
-  $("auth-switch").onclick = () => { state.signup = !state.signup; $("auth-title").textContent = state.signup?"申请注册":"登录"; $("auth-submit").textContent = state.signup?"注册":"登录"; $("auth-switch").textContent = state.signup?"已有账号？返回登录":"没有账号？申请注册"; authMessage.textContent=""; };
-  $("refresh-button").onclick = () => handleSession(state.session); $("signout-button").onclick = () => client.auth.signOut();
+  $("remember-login").checked = rememberActive();
+  $("refresh-button").onclick = () => handleSession(state.session); $("signout-button").onclick = () => { applyRememberPreference(false); $("remember-login").checked = false; client.auth.signOut(); };
   $("members-button").onclick = openMembers; $("add-button").onclick = () => openAccountModal(); $("account-form").onsubmit = saveAccount;
   $("search-input").oninput = e => { state.search = e.target.value; render(); }; $("error-banner").querySelector("button").onclick = () => $("error-banner").classList.add("hidden");
   document.querySelectorAll("[data-close]").forEach(btn => btn.onclick = () => $(btn.dataset.close).classList.add("hidden"));
