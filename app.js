@@ -28,7 +28,7 @@
   };
   const client = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth:{ storage:authStorage, persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null;
   const $ = (id) => document.getElementById(id);
-  const loginAliases = { admin:"admin@account-share.internal", user:"user@account-share.internal" };
+  const internalLoginDomain = "account-share.internal";
   const state = { session: null, profile: null, accounts: [], selectedId: "", search: "", visiblePassword: false };
 
   const loginView = $("login-view"), appView = $("app-view"), workspace = $("workspace"), pendingView = $("pending-view");
@@ -46,6 +46,14 @@
   function messageOf(error) { return error?.message || "操作失败，请稍后再试。"; }
   function esc(value) { return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c])); }
   function isAdmin() { return state.profile?.role === "admin"; }
+  function loginEmail(username) {
+    const value = username.trim().toLowerCase();
+    return /^[a-z][a-z0-9._-]{2,23}$/.test(value) ? `${value}@${internalLoginDomain}` : "";
+  }
+  function displayLogin(email) {
+    const suffix = `@${internalLoginDomain}`;
+    return email?.endsWith(suffix) ? email.slice(0, -suffix.length) : email;
+  }
   function selected() { return state.accounts.find(x => x.id === state.selectedId) || null; }
   function applyRememberPreference(enabled) {
     if (enabled) {
@@ -155,21 +163,52 @@
   async function openMembers() {
     const { data, error } = await client.from("profiles").select("id,email,display_name,role,approved,created_at").order("created_at");
     if (error) return showError(messageOf(error));
-    $("member-list").innerHTML = data.map(user => `<div class="user-row"><div class="member-avatar">${esc((user.display_name||user.email).slice(0,1).toUpperCase())}</div><div class="member-name"><strong>${esc(user.display_name||user.email)}</strong><small>${esc(user.email)}</small></div><select data-role="${user.id}" ${user.id===state.profile.id?"disabled":""}><option value="user" ${user.role==="user"?"selected":""}>普通用户</option><option value="admin" ${user.role==="admin"?"selected":""}>管理员</option></select><label class="approval"><input type="checkbox" data-approved="${user.id}" ${user.approved?"checked":""} ${user.id===state.profile.id?"disabled":""}> 已批准</label></div>`).join("");
+    $("member-list").innerHTML = data.map(user => `<div class="user-row"><div class="member-avatar">${esc((user.display_name||user.email).slice(0,1).toUpperCase())}</div><div class="member-name"><strong>${esc(user.display_name||user.email)}</strong><small>登录账号：${esc(displayLogin(user.email))}</small></div><select data-role="${user.id}" ${user.id===state.profile.id?"disabled":""}><option value="user" ${user.role==="user"?"selected":""}>普通用户</option><option value="admin" ${user.role==="admin"?"selected":""}>管理员</option></select><label class="approval"><input type="checkbox" data-approved="${user.id}" ${user.approved?"checked":""} ${user.id===state.profile.id?"disabled":""}> 已批准</label>${user.role === "user" ? `<button class="member-delete" data-delete-user="${user.id}" data-delete-name="${esc(user.display_name||displayLogin(user.email))}" type="button">删除</button>` : `<span class="member-protected">受保护</span>`}</div>`).join("");
     $("member-list").querySelectorAll("select,input[type=checkbox]").forEach(el => el.onchange = async () => {
       const id = el.dataset.role || el.dataset.approved; const row = data.find(x=>x.id===id);
       const role = $("member-list").querySelector(`[data-role="${id}"]`).value; const approved = $("member-list").querySelector(`[data-approved="${id}"]`).checked;
       const { error } = await client.rpc("set_member_access", { p_user_id:id, p_role:role, p_approved:approved });
       if (error) { el.value = row.role; el.checked = row.approved; return showError(messageOf(error)); } toast("成员权限已更新");
     });
+    $("member-list").querySelectorAll("[data-delete-user]").forEach(button => button.onclick = () => deleteMember(button.dataset.deleteUser, button.dataset.deleteName));
     $("members-modal").classList.remove("hidden");
+  }
+
+  async function manageUser(payload) {
+    const response = await fetch(`${cfg.supabaseUrl}/functions/v1/manage-users`, {
+      method: "POST",
+      headers: { "Content-Type":"application/json", "apikey":cfg.supabaseAnonKey, "Authorization":`Bearer ${state.session.access_token}` },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "账号操作失败，请稍后再试。");
+    return result;
+  }
+
+  async function createMember(event) {
+    event.preventDefault();
+    const username = $("member-username").value.trim().toLowerCase();
+    const message = $("member-form-message"), button = $("member-create-button");
+    if (!loginEmail(username)) { message.textContent = "登录账号须以字母开头，只能使用字母、数字、点、横线或下划线。"; return; }
+    message.textContent = "正在创建…"; button.disabled = true;
+    try {
+      await manageUser({ action:"create", username, displayName:$("member-display-name").value.trim(), password:$("member-password").value });
+      $("member-create-form").reset(); message.textContent = ""; await openMembers(); toast("使用者账号已创建");
+    } catch (error) { message.textContent = messageOf(error); }
+    finally { button.disabled = false; }
+  }
+
+  async function deleteMember(userId, displayName) {
+    if (!confirm(`确认删除“${displayName}”？删除后该账号将无法登录，且不能恢复。`)) return;
+    try { await manageUser({ action:"delete", userId }); await openMembers(); toast("使用者账号已删除"); }
+    catch (error) { showError(messageOf(error)); }
   }
 
   authForm.onsubmit = async (event) => {
     event.preventDefault(); authMessage.textContent = "处理中…";
     const loginName = $("auth-login").value.trim().toLowerCase();
-    const email = loginAliases[loginName];
-    if (!email) { authMessage.textContent = "账号不存在，请输入 admin 或 user。"; return; }
+    const email = loginEmail(loginName);
+    if (!email) { authMessage.textContent = "登录账号格式不正确。"; return; }
     applyRememberPreference($("remember-login").checked);
     const result = await client.auth.signInWithPassword({ email, password:$("auth-password").value });
     authMessage.textContent = result.error ? "账号或密码错误。" : "登录成功。";
@@ -177,6 +216,7 @@
   $("remember-login").checked = rememberActive();
   $("refresh-button").onclick = () => handleSession(state.session); $("signout-button").onclick = () => { applyRememberPreference(false); $("remember-login").checked = false; client.auth.signOut(); };
   $("members-button").onclick = openMembers; $("add-button").onclick = () => openAccountModal(); $("account-form").onsubmit = saveAccount;
+  $("member-create-form").onsubmit = createMember;
   $("search-input").oninput = e => { state.search = e.target.value; render(); }; $("error-banner").querySelector("button").onclick = () => $("error-banner").classList.add("hidden");
   document.querySelectorAll("[data-close]").forEach(btn => btn.onclick = () => $(btn.dataset.close).classList.add("hidden"));
 

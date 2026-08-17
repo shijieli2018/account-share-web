@@ -12,7 +12,7 @@
     <form id="login-form" class="auth-card">
       <div class="brand auth-brand"><span class="brand-mark">享</span><div><h1>账号共享台</h1><p>仅限获得许可的团队成员</p></div></div>
       <h2>登录</h2>
-      <p class="auth-help">请输入管理员或使用者的固定账号和密码。</p>
+      <p class="auth-help">请输入管理员分配的登录账号和密码。</p>
       <label class="edit-field"><span>登录账号</span><input id="auth-login" type="text" autocomplete="username" autocapitalize="none" required></label>
       <label class="edit-field"><span>密码</span><input id="auth-password" type="password" minlength="8" autocomplete="current-password" required></label>
       <label class="remember-option"><input id="remember-login" type="checkbox"><span><strong>近30天免登录</strong><small>仅建议在自己的可信电脑上勾选</small></span></label>
@@ -63,7 +63,14 @@
   </form></div>
 
   <div id="members-modal" class="modal-backdrop hidden"><section class="modal users-modal">
-    <div class="modal-head"><div><span class="eyebrow">管理员操作</span><h2>成员权限</h2><p>新成员注册后默认为待批准；管理员可批准并设置身份。</p></div><button class="modal-close" data-close="members-modal">×</button></div>
+    <div class="modal-head"><div><span class="eyebrow">管理员操作</span><h2>使用者账号</h2><p>创建新的使用者登录账号，或删除不再使用的普通账号。</p></div><button class="modal-close" data-close="members-modal">×</button></div>
+    <form id="member-create-form" class="member-create-form">
+      <label class="edit-field"><span>登录账号 *</span><input id="member-username" minlength="3" maxlength="24" pattern="[A-Za-z][A-Za-z0-9._-]{2,23}" autocomplete="off" placeholder="例如 user2" required></label>
+      <label class="edit-field"><span>显示名称 *</span><input id="member-display-name" maxlength="40" autocomplete="off" placeholder="例如 使用账号2" required></label>
+      <label class="edit-field"><span>初始密码 *</span><input id="member-password" type="password" minlength="8" maxlength="72" autocomplete="new-password" required></label>
+      <button id="member-create-button" class="button" type="submit">创建使用者</button>
+      <p id="member-form-message" class="member-form-message" aria-live="polite"></p>
+    </form>
     <div id="member-list" class="user-table"></div>
     <div class="modal-actions"><button class="button" data-close="members-modal">完成</button></div>
   </section></div>
