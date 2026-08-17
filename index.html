@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>账号共享台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section id="login-view" class="auth-page">
+    <form id="login-form" class="auth-card">
+      <div class="brand auth-brand"><span class="brand-mark">享</span><div><h1>账号共享台</h1><p>仅限获得许可的团队成员</p></div></div>
+      <h2 id="auth-title">登录</h2>
+      <p class="auth-help">使用邮箱和密码进入。新成员注册后，需要管理员批准。</p>
+      <label class="edit-field"><span>邮箱</span><input id="auth-email" type="email" autocomplete="email" required></label>
+      <label class="edit-field"><span>密码</span><input id="auth-password" type="password" minlength="8" autocomplete="current-password" required></label>
+      <button id="auth-submit" class="button auth-submit" type="submit">登录</button>
+      <button id="auth-switch" class="link-button" type="button">没有账号？申请注册</button>
+      <p id="auth-message" class="form-message" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <main id="app-view" class="app-shell hidden">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">享</span><div><h1>账号共享台</h1><p>团队账号资料与额度时间同步</p></div></div>
+      <div class="top-actions">
+        <button id="members-button" class="header-button hidden">成员权限</button>
+        <button id="refresh-button" class="header-button">刷新</button>
+        <div id="user-chip" class="user-chip"></div>
+        <button id="signout-button" class="header-button">退出</button>
+      </div>
+    </header>
+    <div id="error-banner" class="error-banner hidden"><span></span><button type="button">关闭</button></div>
+    <section id="pending-view" class="pending-card panel hidden">
+      <span class="pending-icon">候</span><h2>等待管理员批准</h2>
+      <p>你的注册已经提交。管理员批准后，刷新页面即可进入。</p>
+    </section>
+    <section id="workspace" class="workspace hidden">
+      <aside class="sidebar panel">
+        <div class="sidebar-heading"><div><small>工作台</small><h2>共享账号</h2></div><span id="account-count" class="count">0</span></div>
+        <label class="search"><span>⌕</span><input id="search-input" aria-label="搜索账号" placeholder="搜索名称或账号"></label>
+        <nav id="account-list" class="account-list" aria-label="账号列表"></nav>
+        <button id="add-button" class="add-button hidden">＋ 新增账号</button>
+      </aside>
+      <section id="content" class="content"></section>
+    </section>
+  </main>
+
+  <div id="account-modal" class="modal-backdrop hidden"><form id="account-form" class="modal">
+    <div class="modal-head"><div><span class="eyebrow">管理员操作</span><h2 id="account-modal-title">新增共享账号</h2></div><button type="button" class="modal-close" data-close="account-modal">×</button></div>
+    <input id="edit-id" type="hidden">
+    <div class="editor-grid">
+      <label class="edit-field"><span>显示名称 *</span><input id="edit-label" required></label>
+      <label class="edit-field"><span>登录账号 *</span><input id="edit-login" required></label>
+      <label class="edit-field"><span>账号密码</span><input id="edit-password" type="password"></label>
+      <label class="edit-field"><span>排列顺序</span><input id="edit-sort" type="number" value="10"></label>
+      <label class="edit-field wide"><span>邮箱入口</span><input id="edit-mailbox"></label>
+      <label class="edit-field wide"><span>自助验证邮箱</span><input id="edit-verification"></label>
+      <label class="edit-field wide"><span>备注</span><textarea id="edit-notes"></textarea></label>
+    </div>
+    <div class="modal-actions"><button type="button" class="button ghost" data-close="account-modal">取消</button><button class="button">保存账号资料</button></div>
+  </form></div>
+
+  <div id="members-modal" class="modal-backdrop hidden"><section class="modal users-modal">
+    <div class="modal-head"><div><span class="eyebrow">管理员操作</span><h2>成员权限</h2><p>新成员注册后默认为待批准；管理员可批准并设置身份。</p></div><button class="modal-close" data-close="members-modal">×</button></div>
+    <div id="member-list" class="user-table"></div>
+    <div class="modal-actions"><button class="button" data-close="members-modal">完成</button></div>
+  </section></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+。
