@@ -113,8 +113,9 @@
 
   function accountButton(item, index) {
     const disabled = !item.active;
-    const secondary = disabled ? "已停用" : `${esc(item.quota_status)}${item.quota_refresh_at ? ` · ${esc(shortTime(item.quota_refresh_at))}` : ""}`;
-    return `<button class="account-item ${disabled ? "disabled" : ""} ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}"><span class="avatar ${disabled ? "gray" : statusTone(item.quota_status)}">${String(index + 1).padStart(2,"0")}</span><span><strong>${esc(item.label)}</strong><small>${secondary}</small></span></button>`;
+    const secondary = disabled ? "已停用" : esc(item.quota_status);
+    const refresh = item.quota_refresh_at ? esc(shortTime(item.quota_refresh_at)) : "未设置";
+    return `<button class="account-item ${disabled ? "disabled" : ""} ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}"><span class="avatar ${disabled ? "gray" : statusTone(item.quota_status)}">${String(index + 1).padStart(2,"0")}</span><span class="account-summary"><strong>${esc(item.label)}</strong><small>${secondary}</small>${disabled ? "" : `<small class="account-refresh">额度刷新：${refresh}</small>`}</span></button>`;
   }
 
   function render() {
