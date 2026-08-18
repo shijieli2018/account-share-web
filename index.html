@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>账号共享台</title>
-  <link rel="stylesheet" href="styles.css?v=20260818c">
+  <link rel="stylesheet" href="styles.css?v=20260818d">
 </head>
 <body>
   <section id="login-view" class="auth-page">
@@ -75,10 +75,18 @@
     <div id="member-list" class="user-table"></div>
     <div class="modal-actions"><button class="button" data-close="members-modal">完成</button></div>
   </section></div>
+
+  <div id="account-access-modal" class="modal-backdrop hidden"><section class="modal access-modal">
+    <div class="modal-head"><div><span class="eyebrow">管理员操作</span><h2>设置可见共享账号</h2><p id="account-access-user"></p></div><button class="modal-close" data-close="account-access-modal">×</button></div>
+    <input id="account-access-user-id" type="hidden">
+    <div class="access-toolbar"><span>勾选后，该使用者才能查看并更新对应共享账号。</span><button id="account-access-toggle" class="button ghost" type="button">全选／取消全选</button></div>
+    <div id="account-access-list" class="access-list"></div>
+    <div class="modal-actions"><button class="button ghost" data-close="account-access-modal" type="button">取消</button><button id="account-access-save" class="button" type="button">保存可见范围</button></div>
+  </section></div>
   <div id="toast" class="toast hidden"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="config.js"></script>
-  <script src="app.js?v=20260818c"></script>
+  <script src="app.js?v=20260818d"></script>
 </body>
 </html>

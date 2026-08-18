@@ -191,17 +191,47 @@
     if (error) return showError(messageOf(error)); await loadAccounts(true); toast("额度信息已同步");
   }
   async function openMembers() {
-    const { data, error } = await client.from("profiles").select("id,email,display_name,role,approved,created_at").order("created_at");
-    if (error) return showError(messageOf(error));
-    $("member-list").innerHTML = data.map(user => `<div class="user-row"><div class="member-avatar">${esc((user.display_name||user.email).slice(0,1).toUpperCase())}</div><div class="member-name"><strong>${esc(user.display_name||user.email)}</strong><small>登录账号：${esc(displayLogin(user.email))}</small></div><select data-role="${user.id}" ${user.id===state.profile.id?"disabled":""}><option value="user" ${user.role==="user"?"selected":""}>普通用户</option><option value="admin" ${user.role==="admin"?"selected":""}>管理员</option></select><label class="approval"><input type="checkbox" data-approved="${user.id}" ${user.approved?"checked":""} ${user.id===state.profile.id?"disabled":""}> 已批准</label>${user.role === "user" ? `<button class="member-delete" data-delete-user="${user.id}" data-delete-name="${esc(user.display_name||displayLogin(user.email))}" type="button">删除</button>` : `<span class="member-protected">受保护</span>`}</div>`).join("");
+    const [profilesResult, accessResult] = await Promise.all([
+      client.from("profiles").select("id,email,display_name,role,approved,created_at").order("created_at"),
+      client.from("account_user_access").select("user_id,account_id")
+    ]);
+    if (profilesResult.error) return showError(messageOf(profilesResult.error));
+    if (accessResult.error) return showError(messageOf(accessResult.error));
+    const data = profilesResult.data || [], accessRows = accessResult.data || [];
+    const activeTotal = state.accounts.filter(account => account.active).length;
+    const accessCount = userId => accessRows.filter(row => row.user_id === userId && state.accounts.some(account => account.id === row.account_id && account.active)).length;
+    $("member-list").innerHTML = data.map(user => `<div class="user-row"><div class="member-avatar">${esc((user.display_name||user.email).slice(0,1).toUpperCase())}</div><div class="member-name"><strong>${esc(user.display_name||user.email)}</strong><small>登录账号：${esc(displayLogin(user.email))}</small></div><select data-role="${user.id}" ${user.id===state.profile.id?"disabled":""}><option value="user" ${user.role==="user"?"selected":""}>普通用户</option><option value="admin" ${user.role==="admin"?"selected":""}>管理员</option></select><label class="approval"><input type="checkbox" data-approved="${user.id}" ${user.approved?"checked":""} ${user.id===state.profile.id?"disabled":""}> 已批准</label>${user.role === "user" ? `<button class="member-access" data-access-user="${user.id}" data-access-name="${esc(user.display_name||displayLogin(user.email))}" type="button">账号 ${accessCount(user.id)}/${activeTotal}</button><button class="member-delete" data-delete-user="${user.id}" data-delete-name="${esc(user.display_name||displayLogin(user.email))}" type="button">删除</button>` : `<span class="member-protected">全部可见</span><span class="member-protected">受保护</span>`}</div>`).join("");
     $("member-list").querySelectorAll("select,input[type=checkbox]").forEach(el => el.onchange = async () => {
       const id = el.dataset.role || el.dataset.approved; const row = data.find(x=>x.id===id);
       const role = $("member-list").querySelector(`[data-role="${id}"]`).value; const approved = $("member-list").querySelector(`[data-approved="${id}"]`).checked;
       const { error } = await client.rpc("set_member_access", { p_user_id:id, p_role:role, p_approved:approved });
       if (error) { el.value = row.role; el.checked = row.approved; return showError(messageOf(error)); } toast("成员权限已更新");
     });
+    $("member-list").querySelectorAll("[data-access-user]").forEach(button => button.onclick = () => openAccountAccess(button.dataset.accessUser, button.dataset.accessName));
     $("member-list").querySelectorAll("[data-delete-user]").forEach(button => button.onclick = () => deleteMember(button.dataset.deleteUser, button.dataset.deleteName));
     $("members-modal").classList.remove("hidden");
+  }
+
+  async function openAccountAccess(userId, displayName) {
+    const { data, error } = await client.from("account_user_access").select("account_id").eq("user_id", userId);
+    if (error) return showError(messageOf(error));
+    const granted = new Set((data || []).map(row => row.account_id));
+    const activeAccounts = state.accounts.filter(account => account.active);
+    $("account-access-user-id").value = userId;
+    $("account-access-user").textContent = `使用者：${displayName}`;
+    $("account-access-list").innerHTML = activeAccounts.length ? activeAccounts.map(account => `<label class="access-item"><input type="checkbox" value="${account.id}" ${granted.has(account.id)?"checked":""}><span><strong>${esc(account.label)}</strong><small>${esc(account.login_account)}</small></span></label>`).join("") : `<p class="access-empty">当前没有使用中的共享账号。</p>`;
+    $("account-access-modal").classList.remove("hidden");
+  }
+
+  async function saveAccountAccess() {
+    const userId = $("account-access-user-id").value;
+    const accountIds = Array.from($("account-access-list").querySelectorAll("input:checked"), input => input.value);
+    const button = $("account-access-save"); button.disabled = true;
+    const { error } = await client.rpc("set_member_account_access", { p_user_id:userId, p_account_ids:accountIds });
+    button.disabled = false;
+    if (error) return showError(messageOf(error));
+    $("account-access-modal").classList.add("hidden");
+    await openMembers(); toast("可见账号范围已保存");
   }
 
   async function manageUser(payload) {
@@ -247,6 +277,12 @@
   $("refresh-button").onclick = () => handleSession(state.session); $("signout-button").onclick = () => { applyRememberPreference(false); $("remember-login").checked = false; client.auth.signOut(); };
   $("members-button").onclick = openMembers; $("add-button").onclick = () => openAccountModal(); $("account-form").onsubmit = saveAccount;
   $("member-create-form").onsubmit = createMember;
+  $("account-access-save").onclick = saveAccountAccess;
+  $("account-access-toggle").onclick = () => {
+    const boxes = Array.from($("account-access-list").querySelectorAll('input[type="checkbox"]'));
+    const selectAll = boxes.some(box => !box.checked);
+    boxes.forEach(box => { box.checked = selectAll; });
+  };
   $("search-input").oninput = e => { state.search = e.target.value; render(); }; $("error-banner").querySelector("button").onclick = () => $("error-banner").classList.add("hidden");
   document.querySelectorAll("[data-close]").forEach(btn => btn.onclick = () => $(btn.dataset.close).classList.add("hidden"));
 
