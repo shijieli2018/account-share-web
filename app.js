@@ -102,7 +102,7 @@
 
   async function loadAccounts(silent = false) {
     if (!silent) content.innerHTML = `<div class="panel empty-card"><p>正在加载共享资料…</p></div>`;
-    const { data, error } = await client.from("accounts").select("id,label,login_account,account_password,mailbox_url,verification_email,quota_status,quota_refresh_at,notes,sort_order,updated_at,updated_by_profile:profiles!accounts_updated_by_fkey(display_name,email)").eq("active", true).order("sort_order").order("label");
+    const { data, error } = await client.from("accounts").select("id,label,login_account,account_password,mailbox_url,verification_email,account_expires_at,quota_status,quota_refresh_at,notes,sort_order,updated_at,updated_by_profile:profiles!accounts_updated_by_fkey(display_name,email)").eq("active", true).order("sort_order").order("label");
     if (error) { showError(messageOf(error)); return; }
     state.accounts = data || [];
     if (!state.accounts.some(x => x.id === state.selectedId)) state.selectedId = state.accounts[0]?.id || "";
@@ -122,7 +122,9 @@
     const item = selected();
     if (!item) { content.innerHTML = `<div class="panel empty-card"><span>＋</span><h2>还没有共享账号</h2><p>${isAdmin() ? "点击左侧“新增账号”录入第一条资料。" : "请联系管理员添加账号资料。"}</p></div>`; return; }
     const updater = item.updated_by_profile?.display_name || item.updated_by_profile?.email || "未知用户";
+    const expired = item.account_expires_at && new Date(item.account_expires_at).getTime() < Date.now();
     content.innerHTML = `<div class="detail-head"><div><span class="eyebrow">账号详情</span><h2>${esc(item.label)}</h2><p>最近更新：${esc(formatDate(item.updated_at))} · ${esc(updater)}</p></div>${isAdmin()?`<div class="detail-actions"><button id="edit-button" class="button ghost">编辑资料</button><button id="disable-button" class="button danger">停用</button></div>`:""}</div>
+      <section class="panel expiry-card ${expired ? "expired" : ""}"><div><span class="section-icon calendar">期</span><div><h3>账号有效期</h3><p>由管理员单独设置，不代表额度刷新时间</p></div></div><strong>${item.account_expires_at ? esc(formatFullDate(item.account_expires_at)) : "未设置"}</strong>${expired ? `<span class="expiry-state">已过期</span>` : ""}</section>
       <section class="panel credentials"><div class="section-title"><div><span class="section-icon">钥</span><div><h3>登录与验证</h3><p>敏感内容默认隐藏，按需复制</p></div></div><span class="secure-chip">仅批准成员可见</span></div><div class="field-grid">
       ${field("登录账号", item.login_account, "login")}${field("账号密码", state.visiblePassword ? item.account_password : (item.account_password ? "••••••••••••••" : "未填写"), "password", true)}${field("邮箱入口", item.mailbox_url || "未填写", "mailbox")}${field("自助验证邮箱", item.verification_email || "未填写", "verification")}</div></section>
       <section class="panel quota-card"><div class="quota-copy"><span class="section-icon mint">时</span><div><h3>额度与更新时间</h3><p>管理员与普通成员都可以更新此区域</p></div></div><div class="quota-form"><label><span>额度状态</span><select id="quota-status">${["可用","额度不足","等待刷新","暂停使用"].map(v=>`<option ${v===item.quota_status?"selected":""}>${v}</option>`).join("")}</select></label><label><span>预计刷新时间（北京时间）</span><input id="quota-time" type="datetime-local" value="${esc(toBeijingInput(item.quota_refresh_at))}"></label><button id="quota-save" class="button">保存更新</button></div></section>
@@ -139,12 +141,13 @@
 
   function openAccountModal(item = null) {
     $("account-modal-title").textContent = item ? "编辑账号资料" : "新增共享账号";
-    $("edit-id").value = item?.id || ""; $("edit-label").value = item?.label || ""; $("edit-login").value = item?.login_account || ""; $("edit-password").value = item?.account_password || ""; $("edit-mailbox").value = item?.mailbox_url || ""; $("edit-verification").value = item?.verification_email || ""; $("edit-notes").value = item?.notes || ""; $("edit-sort").value = item?.sort_order ?? 10;
+    $("edit-id").value = item?.id || ""; $("edit-label").value = item?.label || ""; $("edit-login").value = item?.login_account || ""; $("edit-password").value = item?.account_password || ""; $("edit-expires").value = toBeijingInput(item?.account_expires_at); $("edit-mailbox").value = item?.mailbox_url || ""; $("edit-verification").value = item?.verification_email || ""; $("edit-notes").value = item?.notes || ""; $("edit-sort").value = item?.sort_order ?? 10;
     $("account-modal").classList.remove("hidden");
   }
   async function saveAccount(event) {
     event.preventDefault();
-    const payload = { id: $("edit-id").value || null, label: $("edit-label").value.trim(), login_account: $("edit-login").value.trim(), account_password: $("edit-password").value, mailbox_url: $("edit-mailbox").value.trim(), verification_email: $("edit-verification").value.trim(), notes: $("edit-notes").value.trim(), sort_order: Number($("edit-sort").value)||10 };
+    const expiresLocal = $("edit-expires").value;
+    const payload = { id: $("edit-id").value || null, label: $("edit-label").value.trim(), login_account: $("edit-login").value.trim(), account_password: $("edit-password").value, account_expires_at: expiresLocal ? new Date(expiresLocal).toISOString() : null, mailbox_url: $("edit-mailbox").value.trim(), verification_email: $("edit-verification").value.trim(), notes: $("edit-notes").value.trim(), sort_order: Number($("edit-sort").value)||10 };
     const { data, error } = await client.rpc("save_account", { p_account: payload });
     if (error) return showError(messageOf(error));
     $("account-modal").classList.add("hidden"); state.selectedId = data; await loadAccounts(true); toast("账号资料已保存");
@@ -221,6 +224,7 @@
   document.querySelectorAll("[data-close]").forEach(btn => btn.onclick = () => $(btn.dataset.close).classList.add("hidden"));
 
   function formatDate(value){try{return new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}).format(new Date(value))}catch{return value||"未知时间"}}
+  function formatFullDate(value){try{return new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value))}catch{return value||"未设置"}}
   function shortTime(value){try{return new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(value))}catch{return value}}
   function toBeijingInput(value){if(!value)return"";try{return new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value)).replace(" ","T")}catch{return""}}
   function statusTone(status){return status==="可用"?"":status==="额度不足"||status==="等待刷新"?"amber":"gray"}
