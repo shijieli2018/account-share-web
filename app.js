@@ -102,18 +102,34 @@
 
   async function loadAccounts(silent = false) {
     if (!silent) content.innerHTML = `<div class="panel empty-card"><p>正在加载共享资料…</p></div>`;
-    const { data, error } = await client.from("accounts").select("id,label,login_account,account_password,mailbox_url,verification_email,account_expires_at,quota_status,quota_refresh_at,notes,sort_order,updated_at,updated_by_profile:profiles!accounts_updated_by_fkey(display_name,email)").eq("active", true).order("sort_order").order("label");
+    let request = client.from("accounts").select("id,label,login_account,account_password,mailbox_url,verification_email,account_expires_at,quota_status,quota_refresh_at,notes,sort_order,active,updated_at,updated_by_profile:profiles!accounts_updated_by_fkey(display_name,email)").order("sort_order").order("label");
+    if (!isAdmin()) request = request.eq("active", true);
+    const { data, error } = await request;
     if (error) { showError(messageOf(error)); return; }
     state.accounts = data || [];
-    if (!state.accounts.some(x => x.id === state.selectedId)) state.selectedId = state.accounts[0]?.id || "";
+    if (!state.accounts.some(x => x.id === state.selectedId)) state.selectedId = state.accounts.find(x => x.active)?.id || state.accounts[0]?.id || "";
     render();
+  }
+
+  function accountButton(item, index) {
+    const disabled = !item.active;
+    const secondary = disabled ? "已停用" : `${esc(item.quota_status)}${item.quota_refresh_at ? ` · ${esc(shortTime(item.quota_refresh_at))}` : ""}`;
+    return `<button class="account-item ${disabled ? "disabled" : ""} ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}"><span class="avatar ${disabled ? "gray" : statusTone(item.quota_status)}">${String(index + 1).padStart(2,"0")}</span><span><strong>${esc(item.label)}</strong><small>${secondary}</small></span></button>`;
   }
 
   function render() {
     const query = state.search.trim().toLowerCase();
     const filtered = query ? state.accounts.filter(x => `${x.label} ${x.login_account}`.toLowerCase().includes(query)) : state.accounts;
-    $("account-count").textContent = state.accounts.length;
-    accountList.innerHTML = filtered.length ? filtered.map((item, i) => `<button class="account-item ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}"><span class="avatar ${statusTone(item.quota_status)}">${String(i + 1).padStart(2,"0")}</span><span><strong>${esc(item.label)}</strong><small>${esc(item.quota_status)}${item.quota_refresh_at ? ` · ${esc(shortTime(item.quota_refresh_at))}` : ""}</small></span></button>`).join("") : `<p class="list-empty">${state.accounts.length ? "没有匹配的账号" : "还没有共享账号"}</p>`;
+    const activeAccounts = filtered.filter(x => x.active);
+    const disabledAccounts = filtered.filter(x => !x.active);
+    $("account-count").textContent = state.accounts.filter(x => x.active).length;
+    if (!filtered.length) {
+      accountList.innerHTML = `<p class="list-empty">${state.accounts.length ? "没有匹配的账号" : "还没有共享账号"}</p>`;
+    } else if (isAdmin()) {
+      accountList.innerHTML = `${activeAccounts.length ? `<div class="list-section-label"><span>使用中</span><b>${activeAccounts.length}</b></div>${activeAccounts.map((item, i) => accountButton(item, i)).join("")}` : ""}${disabledAccounts.length ? `<div class="list-section-label disabled-label"><span>已停用</span><b>${disabledAccounts.length}</b></div>${disabledAccounts.map((item, i) => accountButton(item, activeAccounts.length + i)).join("")}` : ""}`;
+    } else {
+      accountList.innerHTML = activeAccounts.map((item, i) => accountButton(item, i)).join("");
+    }
     accountList.querySelectorAll("[data-id]").forEach(btn => btn.onclick = () => { state.selectedId = btn.dataset.id; state.visiblePassword = false; render(); });
     renderDetail();
   }
@@ -123,16 +139,21 @@
     if (!item) { content.innerHTML = `<div class="panel empty-card"><span>＋</span><h2>还没有共享账号</h2><p>${isAdmin() ? "点击左侧“新增账号”录入第一条资料。" : "请联系管理员添加账号资料。"}</p></div>`; return; }
     const updater = item.updated_by_profile?.display_name || item.updated_by_profile?.email || "未知用户";
     const expired = item.account_expires_at && new Date(item.account_expires_at).getTime() < Date.now();
-    content.innerHTML = `<div class="detail-head"><div><span class="eyebrow">账号详情</span><h2>${esc(item.label)}</h2><p>最近更新：${esc(formatDate(item.updated_at))} · ${esc(updater)}</p></div>${isAdmin()?`<div class="detail-actions"><button id="edit-button" class="button ghost">编辑资料</button><button id="disable-button" class="button danger">停用</button></div>`:""}</div>
+    const disabled = !item.active;
+    content.innerHTML = `<div class="detail-head"><div><span class="eyebrow">账号详情</span><h2>${esc(item.label)}</h2><p>最近更新：${esc(formatDate(item.updated_at))} · ${esc(updater)}</p></div>${isAdmin()?`<div class="detail-actions">${disabled ? `<button id="restore-button" class="button restore">恢复使用</button>` : `<button id="edit-button" class="button ghost">编辑资料</button><button id="disable-button" class="button danger">停用</button>`}</div>`:""}</div>
+      ${disabled ? `<section class="disabled-account-notice"><span>停</span><div><strong>此账号已停用</strong><p>仅管理员可以查看。恢复后，普通使用者才会重新看到此账号。</p></div></section>` : ""}
       <section class="panel expiry-card ${expired ? "expired" : ""}"><div><span class="section-icon calendar">期</span><div><h3>账号有效期</h3><p>由管理员单独设置，不代表额度刷新时间</p></div></div><strong>${item.account_expires_at ? esc(formatFullDate(item.account_expires_at)) : "未设置"}</strong>${expired ? `<span class="expiry-state">已过期</span>` : ""}</section>
       <section class="panel credentials"><div class="section-title"><div><span class="section-icon">钥</span><div><h3>登录与验证</h3><p>敏感内容默认隐藏，按需复制</p></div></div><span class="secure-chip">仅批准成员可见</span></div><div class="field-grid">
       ${field("登录账号", item.login_account, "login")}${field("账号密码", state.visiblePassword ? item.account_password : (item.account_password ? "••••••••••••••" : "未填写"), "password", true)}${field("邮箱入口", item.mailbox_url || "未填写", "mailbox")}${field("自助验证邮箱", item.verification_email || "未填写", "verification")}</div></section>
-      <section class="panel quota-card"><div class="quota-copy"><span class="section-icon mint">时</span><div><h3>额度与更新时间</h3><p>管理员与普通成员都可以更新此区域</p></div></div><div class="quota-form"><label><span>额度状态</span><select id="quota-status">${["可用","额度不足","等待刷新","暂停使用"].map(v=>`<option ${v===item.quota_status?"selected":""}>${v}</option>`).join("")}</select></label><label><span>预计刷新时间（北京时间）</span><input id="quota-time" type="datetime-local" value="${esc(toBeijingInput(item.quota_refresh_at))}"></label><button id="quota-save" class="button">保存更新</button></div></section>
+      <section class="panel quota-card"><div class="quota-copy"><span class="section-icon mint">时</span><div><h3>额度与更新时间</h3><p>${disabled ? "恢复账号后可继续更新" : "管理员与普通成员都可以更新此区域"}</p></div></div>${disabled ? `<div class="quota-disabled">该账号当前已停用，额度信息不可更新。</div>` : `<div class="quota-form"><label><span>额度状态</span><select id="quota-status">${["可用","额度不足","等待刷新","暂停使用"].map(v=>`<option ${v===item.quota_status?"selected":""}>${v}</option>`).join("")}</select></label><label><span>预计刷新时间（北京时间）</span><input id="quota-time" type="datetime-local" value="${esc(toBeijingInput(item.quota_refresh_at))}"></label><button id="quota-save" class="button">保存更新</button></div>`}</section>
       ${item.notes?`<section class="panel notes-card"><span>备注</span><p>${esc(item.notes)}</p></section>`:""}<section class="notice"><span>i</span><p><strong>权限说明</strong>普通成员只能查看、复制并更新额度时间；账号名称、密码和邮箱资料仅管理员可以修改。</p></section>`;
     content.querySelectorAll("[data-copy]").forEach(btn => btn.onclick = () => copyValue(copySource(btn.dataset.copy, item), btn.dataset.label));
     const show = $("show-password"); if (show) show.onclick = () => { state.visiblePassword = !state.visiblePassword; renderDetail(); };
-    if (isAdmin()) { $("edit-button").onclick = () => openAccountModal(item); $("disable-button").onclick = disableAccount; }
-    $("quota-save").onclick = saveQuota;
+    if (isAdmin()) {
+      if (disabled) $("restore-button").onclick = restoreAccount;
+      else { $("edit-button").onclick = () => openAccountModal(item); $("disable-button").onclick = disableAccount; }
+    }
+    if (!disabled) $("quota-save").onclick = saveQuota;
   }
 
   function field(label, value, source, password = false) { return `<div class="field"><span>${label}</span><div><code title="${esc(value)}">${esc(value)}</code>${password?`<button id="show-password" class="show-button">${state.visiblePassword?"隐藏":"显示"}</button>`:""}<button class="copy-button" data-copy="${source}" data-label="${label}">复制</button></div></div>`; }
@@ -156,6 +177,11 @@
     const item = selected(); if (!item || !confirm(`确认停用“${item.label}”？停用后不再显示，但不会删除历史记录。`)) return;
     const { error } = await client.rpc("disable_account", { p_id: item.id }); if (error) return showError(messageOf(error));
     state.selectedId = ""; await loadAccounts(true); toast("账号已停用");
+  }
+  async function restoreAccount() {
+    const item = selected(); if (!item || !confirm(`确认恢复“${item.label}”？恢复后普通使用者将重新看到该账号。`)) return;
+    const { error } = await client.rpc("restore_account", { p_id: item.id }); if (error) return showError(messageOf(error));
+    await loadAccounts(true); toast("账号已恢复使用");
   }
   async function saveQuota() {
     const item = selected(); if (!item) return;
