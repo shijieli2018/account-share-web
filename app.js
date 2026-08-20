@@ -29,7 +29,7 @@
   const client = configured ? window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth:{ storage:authStorage, persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null;
   const $ = (id) => document.getElementById(id);
   const internalLoginDomain = "account-share.internal";
-  const state = { session: null, profile: null, accounts: [], selectedId: "", search: "", visiblePassword: false };
+  const state = { session: null, profile: null, accounts: [], selectedId: "", search: "", visiblePassword: false, refreshTimer: null };
 
   const loginView = $("login-view"), appView = $("app-view"), workspace = $("workspace"), pendingView = $("pending-view");
   const authForm = $("login-form"), authMessage = $("auth-message"), content = $("content"), accountList = $("account-list");
@@ -78,6 +78,7 @@
   async function handleSession(session) {
     state.session = session;
     if (!session) {
+      clearTimeout(state.refreshTimer); state.refreshTimer = null;
       state.profile = null; state.accounts = [];
       loginView.classList.remove("hidden"); appView.classList.add("hidden");
       return;
@@ -108,14 +109,18 @@
     if (error) { showError(messageOf(error)); return; }
     state.accounts = data || [];
     if (!state.accounts.some(x => x.id === state.selectedId)) state.selectedId = state.accounts.find(x => x.active)?.id || state.accounts[0]?.id || "";
+    scheduleRefreshStatus();
     render();
   }
 
   function accountButton(item, index) {
     const disabled = !item.active;
-    const secondary = disabled ? "已停用" : esc(item.quota_status);
+    const currentStatus = effectiveQuotaStatus(item);
+    const secondary = disabled ? "已停用" : esc(currentStatus);
     const refresh = item.quota_refresh_at ? esc(shortTime(item.quota_refresh_at)) : "未设置";
-    return `<button class="account-item ${disabled ? "disabled" : ""} ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}"><span class="avatar ${disabled ? "gray" : statusTone(item.quota_status)}">${String(index + 1).padStart(2,"0")}</span><span class="account-summary"><strong>${esc(item.label)}</strong><small>${secondary}</small>${disabled ? "" : `<small class="account-refresh">额度刷新：${refresh}</small>`}</span></button>`;
+    const expired = item.account_expires_at && new Date(item.account_expires_at).getTime() < Date.now();
+    const expiry = expired ? "已过期" : (item.account_expires_at ? esc(shortTime(item.account_expires_at)) : "未设置");
+    return `<button class="account-item ${disabled ? "disabled" : ""} ${item.id === state.selectedId ? "active" : ""}" data-id="${item.id}"><span class="avatar ${disabled ? "gray" : statusTone(currentStatus)}">${String(index + 1).padStart(2,"0")}</span><span class="account-summary"><strong>${esc(item.label)}</strong><small>${secondary}</small>${disabled ? "" : `<small class="account-refresh">额度刷新：${refresh}</small>`}<small class="account-expiry ${expired ? "expired" : ""}">有效期：${expiry}</small></span></button>`;
   }
 
   function render() {
@@ -141,12 +146,13 @@
     const updater = item.updated_by_profile?.display_name || item.updated_by_profile?.email || "未知用户";
     const expired = item.account_expires_at && new Date(item.account_expires_at).getTime() < Date.now();
     const disabled = !item.active;
+    const currentStatus = effectiveQuotaStatus(item);
     content.innerHTML = `<div class="detail-head"><div><span class="eyebrow">账号详情</span><h2>${esc(item.label)}</h2><p>最近更新：${esc(formatDate(item.updated_at))} · ${esc(updater)}</p></div>${isAdmin()?`<div class="detail-actions">${disabled ? `<button id="restore-button" class="button restore">恢复使用</button>` : `<button id="edit-button" class="button ghost">编辑资料</button><button id="disable-button" class="button danger">停用</button>`}</div>`:""}</div>
       ${disabled ? `<section class="disabled-account-notice"><span>停</span><div><strong>此账号已停用</strong><p>仅管理员可以查看。恢复后，普通使用者才会重新看到此账号。</p></div></section>` : ""}
       <section class="panel expiry-card ${expired ? "expired" : ""}"><div><span class="section-icon calendar">期</span><div><h3>账号有效期</h3><p>由管理员单独设置，不代表额度刷新时间</p></div></div><strong>${item.account_expires_at ? esc(formatFullDate(item.account_expires_at)) : "未设置"}</strong>${expired ? `<span class="expiry-state">已过期</span>` : ""}</section>
       <section class="panel credentials"><div class="section-title"><div><span class="section-icon">钥</span><div><h3>登录与验证</h3><p>敏感内容默认隐藏，按需复制</p></div></div><span class="secure-chip">仅批准成员可见</span></div><div class="field-grid">
       ${field("登录账号", item.login_account, "login")}${field("账号密码", state.visiblePassword ? item.account_password : (item.account_password ? "••••••••••••••" : "未填写"), "password", true)}${field("邮箱入口", item.mailbox_url || "未填写", "mailbox")}${field("自助验证邮箱", item.verification_email || "未填写", "verification")}</div></section>
-      <section class="panel quota-card"><div class="quota-copy"><span class="section-icon mint">时</span><div><h3>额度与更新时间</h3><p>${disabled ? "恢复账号后可继续更新" : "管理员与普通成员都可以更新此区域"}</p></div></div>${disabled ? `<div class="quota-disabled">该账号当前已停用，额度信息不可更新。</div>` : `<div class="quota-form"><label><span>额度状态</span><select id="quota-status">${["可用","额度不足","等待刷新","暂停使用"].map(v=>`<option ${v===item.quota_status?"selected":""}>${v}</option>`).join("")}</select></label><label><span>预计刷新时间（北京时间）</span><input id="quota-time" type="datetime-local" value="${esc(toBeijingInput(item.quota_refresh_at))}"></label><button id="quota-save" class="button">保存更新</button></div>`}</section>
+      <section class="panel quota-card"><div class="quota-copy"><span class="section-icon mint">时</span><div><h3>额度与更新时间</h3><p>${disabled ? "恢复账号后可继续更新" : "刷新时间到达后，额度状态自动显示为可用"}</p></div></div>${disabled ? `<div class="quota-disabled">该账号当前已停用，额度信息不可更新。</div>` : `<div class="quota-form"><label><span>额度状态</span><select id="quota-status">${["可用","额度不足","等待刷新","暂停使用"].map(v=>`<option ${v===currentStatus?"selected":""}>${v}</option>`).join("")}</select></label><label><span>预计刷新时间（北京时间）</span><input id="quota-time" type="datetime-local" value="${esc(toBeijingInput(item.quota_refresh_at))}"></label><button id="quota-save" class="button">保存更新</button></div>`}</section>
       ${item.notes?`<section class="panel notes-card"><span>备注</span><p>${esc(item.notes)}</p></section>`:""}<section class="notice"><span>i</span><p><strong>权限说明</strong>普通成员只能查看、复制并更新额度时间；账号名称、密码和邮箱资料仅管理员可以修改。</p></section>`;
     content.querySelectorAll("[data-copy]").forEach(btn => btn.onclick = () => copyValue(copySource(btn.dataset.copy, item), btn.dataset.label));
     const show = $("show-password"); if (show) show.onclick = () => { state.visiblePassword = !state.visiblePassword; renderDetail(); };
@@ -290,6 +296,8 @@
   function formatFullDate(value){try{return new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value))}catch{return value||"未设置"}}
   function shortTime(value){try{return new Intl.DateTimeFormat("zh-CN",{timeZone:"Asia/Shanghai",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(value))}catch{return value}}
   function toBeijingInput(value){if(!value)return"";try{return new Intl.DateTimeFormat("sv-SE",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value)).replace(" ","T")}catch{return""}}
+  function effectiveQuotaStatus(item){const refreshAt=item?.quota_refresh_at?new Date(item.quota_refresh_at).getTime():NaN;return Number.isFinite(refreshAt)&&refreshAt<=Date.now()?"可用":item?.quota_status||"可用"}
+  function scheduleRefreshStatus(){clearTimeout(state.refreshTimer);const now=Date.now();const next=state.accounts.map(item=>item.quota_refresh_at?new Date(item.quota_refresh_at).getTime():NaN).filter(time=>Number.isFinite(time)&&time>now).sort((a,b)=>a-b)[0];if(next)state.refreshTimer=setTimeout(()=>{render();scheduleRefreshStatus()},Math.min(next-now+250,2147483647))}
   function statusTone(status){return status==="可用"?"":status==="额度不足"||status==="等待刷新"?"amber":"gray"}
   initialize();
 })();
